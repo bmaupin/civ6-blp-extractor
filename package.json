@@ -1,0 +1,20 @@
+{
+  "name": "civ-blp-tools",
+  "version": "0.1.0",
+  "description": "BLP file extraction tools for Civilization",
+  "type": "module",
+  "scripts": {
+    "investigate": "tsx investigate-blp.ts",
+    "extract": "tsx extract-blp.ts",
+    "analyze": "tsx analyze-assets.ts",
+    "convert-dds": "tsx convert-civ6-raw-to-dds.ts",
+    "scan-strings": "tsx scan-blp-strings.ts",
+    "extract-textures": "tsx extract-textures.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
