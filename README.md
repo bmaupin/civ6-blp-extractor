@@ -1,113 +1,18 @@
 # Civ 6 BLP Extractor
 
-A minimal tool for extracting embedded assets from Civilization VI BLP files.
+> [!WARNING]
+> Most of this project was created using AI
+
+A tool for extracting embedded assets from Civilization VI BLP files with proper naming from embedded metadata.
 
 ## Status
 
-✅ **Working** - Successfully extracts all embedded assets from BLP files.
+✅ **Working** - Successfully extracts all embedded assets from Civ 6 BLP files as DDS textures.
 
 - ✅ Extracts from `strategicview_terraintypes.blp` (14 assets)
 - ✅ Extracts from `strategicview_terrainsprites.blp` (90 assets)
-- 📖 See [docs/investigation.md](./docs/investigation.md) for detailed format analysis
-
-## Tools Included
-
-### `extract-blp.ts`
-
-Main extraction tool. Extracts all embedded assets from a BLP file.
-
-**Usage:**
-
-```bash
-npm run extract -- <blp-file> [output-dir] [ooz-path]
-```
-
-**Example:**
-
-```bash
-npm install
-npm run extract -- workdir/strategicview_terraintypes.blp workdir/extracted
-```
-
-### `investigate-blp.ts`
-
-Analyzes BLP file structure and reports format details.
-
-**Usage:**
-
-```bash
-npm run investigate -- <blp-file>
-```
-
-**Example:**
-
-```bash
-npm run investigate -- workdir/strategicview_terraintypes.blp
-```
-
-### `analyze-assets.ts`
-
-Analyzes extracted asset files to understand their structure and patterns.
-
-**Usage:**
-
-```bash
-npm run analyze -- <directory>
-```
-
-**Example:**
-
-```bash
-npm run analyze -- workdir/extracted
-```
-
-### `convert-civ6-raw-to-dds.ts`
-
-Converts extracted `.raw` assets into `.dds` files using current Civ 6 texture heuristics.
-
-**Usage:**
-
-```bash
-npm run convert-dds -- <input-dir> [output-dir]
-```
-
-**Example:**
-
-```bash
-npm run convert-dds -- workdir/extracted workdir/extracted/dds
-```
-
-### `scan-blp-strings.ts`
-
-Scans BLP package data stripes for ASCII strings (useful for locating original asset names).
-
-**Usage:**
-
-```bash
-npm run scan-strings -- <blp-file> [min-length]
-```
-
-**Example:**
-
-```bash
-npm run scan-strings -- workdir/strategicview_terrainsprites.blp 6
-```
-
-### `extract-textures.ts`
-
-Extracts texture entries using package metadata (names, sizes, mip counts, formats) and writes DDS files with DX10 headers.
-
-**Usage:**
-
-```bash
-npm run extract-textures -- <blp-file> [output-dir]
-```
-
-**Example:**
-
-```bash
-npm run extract-textures -- workdir/strategicview_terrainsprites.blp workdir/textures_sprites
-```
+- ✅ All assets named dynamically from embedded BLP metadata
+- ✅ All output as BC3/DXT5 DDS files (256×256 with mipmaps)
 
 ## Quick Start
 
@@ -115,21 +20,65 @@ npm run extract-textures -- workdir/strategicview_terrainsprites.blp workdir/tex
 # Install dependencies
 npm install
 
-# Extract assets
-npm run extract -- workdir/strategicview_terraintypes.blp
+# Extract a single asset by index
+npx tsx extract-primary-texture.ts <blp-file> <asset-index> [output-dir]
 
-# Analyze the extracted data
-npm run analyze -- workdir/extracted
+# Example: Extract asset 0 from strategicview_terrainsprites.blp
+npx tsx extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 0 workdir/extracted
 
-# Convert extracted raw assets to DDS (heuristic)
-npm run convert-dds -- workdir/extracted
+# Or use npm script
+npm run extract workdir/strategicview_terrainsprites.blp 0 workdir/extracted
+```
+
+## Main Tool: `extract-primary-texture.ts`
+
+The primary extraction tool. Extracts individual texture assets by index from Civ 6 BLP files.
+
+**Features:**
+
+- Dynamically scans BLP package data for asset names (matching "SV\_\*" pattern)
+- Correct offset calculation without additional skip bytes
+- Builds DDS header and wraps BC3 payload
+- Outputs properly named DDS files
+
+**Usage:**
+
+```bash
+npx tsx extract-primary-texture.ts <blp-file> <asset-index> [output-dir]
+```
+
+**Parameters:**
+
+- `<blp-file>`: Path to the BLP file
+- `<asset-index>`: Index of asset to extract (0-based)
+- `[output-dir]`: Output directory (default: current directory)
+
+**Example:**
+
+```bash
+# Extract asset 5 from strategicview_terrainsprites.blp
+npx tsx extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 5 workdir/extracted
+
+# Extract all 90 assets (bash loop)
+for i in {0..89}; do
+  npx tsx extract-primary-texture.ts workdir/strategicview_terrainsprites.blp $i workdir/extracted
+done
+```
+
+## Alternative Tool: `extract-textures.ts`
+
+Alternative extraction tool using package metadata parsing (Civ 7-style approach). Works with Civ 6 but less refined than extract-primary-texture.ts.
+
+**Usage:**
+
+```bash
+npx tsx extract-textures.ts <blp-file> [output-dir]
 ```
 
 ## Requirements
 
 - Node.js 18+
 - TypeScript/tsx (installed via npm)
-- Optional: ooz decompressor for Oodle Kraken compressed files
 
 ## Installation
 
@@ -139,67 +88,70 @@ npm install
 
 ## How It Works
 
-### BLP Header Format
+### Civ 6 BLP Format
+
+Civ 6 BLP files contain embedded assets in a BigData section:
 
 ```
 Offset  Field              Type     Size  Description
 0x00    Magic              String   6     "CIVBLP"
-0x08    packageDataOffset  UInt32   4     Offset to type information
+0x08    packageDataOffset  UInt32   4     Offset to package data
 0x0C    packageDataSize    UInt32   4     Size of package data
 0x10    bigDataOffset      UInt32   4     Offset to embedded assets
 0x14    bigDataCount       UInt32   4     Number of embedded assets
 0x18    fileSize           UInt32   4     Total file size
 ```
 
-### Extraction Process
+### Asset Structure
 
-1. **Read BLP header** to locate BigData section
-2. **Calculate asset boundaries** using bigDataCount
-3. **Extract raw chunks** from BigData section
-4. **Parse CIVBIG containers** if detected in the data
-5. **Save to output directory** as raw files
+Each asset is stored sequentially in the BigData section:
 
-### Asset Format
+- **Asset Size**: 87,552 bytes (fixed)
+- **Asset Format**: BC3/DXT5 compressed texture
+- **Texture Dimensions**: 256×256 pixels
+- **Mipmaps**: 7 levels (256×256 down to 4×4)
+- **Payload Size**: 87,376 bytes (BC3 data only)
 
-Extracted assets are saved as raw binary data by default:
+### Offset Calculation
 
-- **Name**: `asset_NN.raw` or `asset_NN.civbig`
-- **Size**: Varies (87,552 bytes for terrain sprites)
-- **Format**: Unknown (requires further reverse engineering)
+To find asset N within the BigData section:
 
-For strategic-view texture BLPs tested so far, raw assets appear to be:
+```
+assetOffset = header.bigDataOffset + (assetIndex * 87552)
+```
 
-- **176-byte Civ 6-specific prefix/header**, followed by
-- **BC3/DXT5 mip-chain payload** (typically 256x256 with full mipmaps)
+**Important**: No additional offset skip is needed. The 87,552 byte chunks directly contain BC3-compressed texture data.
 
-The `convert-civ6-raw-to-dds.ts` tool wraps that payload with a DDS header.
+### Asset Naming
+
+Asset names are stored as null-terminated ASCII strings in the package data section, appearing in sequential order matching asset indices. Names follow the pattern `SV_*` (e.g., `SV_Sprites_HillsDesert_Color_1`).
+
+The extraction tool dynamically scans the package data to locate and assign names to each asset based on its index.
+
+### Output Format
+
+Extracted assets are saved as DDS files with proper BC3/DXT5 headers:
+
+- **Filename**: `{assetName}.dds` (e.g., `SV_Sprites_HillsDesert_Color_1.dds`)
+- **Format**: BC3/DXT5 (Direct3D 9 compatible)
+- **Header**: DDS with DX10 chunk for extended format information
+
+## Architecture
+
+### Key Files
+
+- **[extract-primary-texture.ts](./extract-primary-texture.ts)**: Main extraction tool (recommended)
+- **[extract-textures.ts](./extract-textures.ts)**: Alternative metadata-based extraction
+- **[blp-format.ts](./blp-format.ts)**: BLP header parsing and type definitions
 
 ## Known Findings
 
-From investigation of `strategicview_terraintypes.blp`:
+From analysis of Civ 6 BLP files:
 
-- **14 embedded assets**, each 87,552 bytes
-- **BigData offset**: 43,008 bytes (0xA800)
-- **No DDS magic bytes** in extracted chunks initially (DDS header is missing)
-- **Likely BC3/DXT5 texture data** after skipping 176-byte prefix
-
-## Target File
-
-Primary investigation target:
-
-```
-~/.local/share/Steam/steamapps/common/Sid Meier's Civilization VI/steamassets/base/platforms/windows/blps/strategicview/strategicview_terraintypes.blp
-```
-
-## Known Issues
-
-1. **Format Mismatch:** Civ 6 uses different BLP internal structure than Civ 7
-2. **No DDS Magic:** Extracted data doesn't contain standard DDS headers
-3. **Unknown Encoding:** Internal asset encoding not yet understood
-
-## Next Steps
-
-See [docs/investigation.md](./docs/investigation.md) for recommended approaches.
+- **Civ 6 vs Civ 7**: Civ 6 uses a different format with preamble all zeros
+- **Asset Storage**: Fixed 87,552-byte chunks, directly accessible without additional parsing
+- **Texture Format**: BC3/DXT5 compression, standard for DX9 compatibility
+- **Metadata**: Asset names embedded in package data as null-terminated strings
 
 ## Resources
 
