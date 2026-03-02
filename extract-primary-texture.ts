@@ -21,7 +21,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { parseBLPHeader, type BLPHeader } from './blp-format';
+import { parseBLPHeader, type BLPHeader } from './blp-format.ts';
 
 interface ExtractionResult {
   success: boolean;
@@ -226,12 +226,12 @@ async function main() {
 
   if (args.length < 1) {
     console.log(
-      'Usage: npx tsx extract-primary-texture.ts <blp-file> [texture-index] [output-dir]',
+      'Usage: node extract-primary-texture.ts <blp-file> [texture-index] [output-dir]',
     );
     console.log('');
     console.log('Example:');
     console.log(
-      '  npx tsx extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 0 workdir/output',
+      '  node extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 0 workdir/output',
     );
     console.log('');
     console.log('Texture indices (based on analysis):');

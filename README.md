@@ -21,13 +21,10 @@ A tool for extracting embedded assets from Civilization VI BLP files with proper
 npm install
 
 # Extract a single asset by index
-npx tsx extract-primary-texture.ts <blp-file> <asset-index> [output-dir]
+node extract-primary-texture.ts <blp-file> <asset-index> [output-dir]
 
 # Example: Extract asset 0 from strategicview_terrainsprites.blp
-npx tsx extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 0 workdir/extracted
-
-# Or use npm script
-npm run extract workdir/strategicview_terrainsprites.blp 0 workdir/extracted
+node extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 0 workdir/extracted
 ```
 
 ## Main Tool: `extract-primary-texture.ts`
@@ -44,7 +41,7 @@ The primary extraction tool. Extracts individual texture assets by index from Ci
 **Usage:**
 
 ```bash
-npx tsx extract-primary-texture.ts <blp-file> <asset-index> [output-dir]
+node extract-primary-texture.ts <blp-file> <asset-index> [output-dir]
 ```
 
 **Parameters:**
@@ -57,18 +54,17 @@ npx tsx extract-primary-texture.ts <blp-file> <asset-index> [output-dir]
 
 ```bash
 # Extract asset 5 from strategicview_terrainsprites.blp
-npx tsx extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 5 workdir/extracted
+node extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 5 workdir/extracted
 
 # Extract all 90 assets (bash loop)
 for i in {0..89}; do
-  npx tsx extract-primary-texture.ts workdir/strategicview_terrainsprites.blp $i workdir/extracted
+  node extract-primary-texture.ts workdir/strategicview_terrainsprites.blp $i workdir/extracted
 done
 ```
 
 ## Requirements
 
-- Node.js 18+
-- TypeScript/tsx (installed via npm)
+- Node.js 24+
 
 ## Installation
 
