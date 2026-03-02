@@ -1,5 +1,7 @@
 - This is a project to extract files from BLP files used by Sid Meier's Civilization VI
 - Some references for BLP files are in docs/references.md
-- Never run rm -rf, always specify the files or file wildcards to delete
-- Always ask before running rm
+- Never delete files, only list the relevant scripts so I can run them myself
 - Never modify files outside of this project
+- Use British spelling
+- archive/ currently contains previous code that may be useful for future features
+  - If you remove code that may be useful for future features, put it in a file in archive/ for now

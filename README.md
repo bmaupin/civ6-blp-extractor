@@ -1,7 +1,7 @@
 # Civ 6 BLP Extractor
 
 > [!WARNING]
-> Most of this project was created using AI
+> Work in progress. Most of this project was created using AI; caveat emptor.
 
 A tool for extracting embedded assets from Civilization VI BLP files with proper naming from embedded metadata.
 
@@ -63,16 +63,6 @@ npx tsx extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 5 wo
 for i in {0..89}; do
   npx tsx extract-primary-texture.ts workdir/strategicview_terrainsprites.blp $i workdir/extracted
 done
-```
-
-## Alternative Tool: `extract-textures.ts`
-
-Alternative extraction tool using package metadata parsing (Civ 7-style approach). Works with Civ 6 but less refined than extract-primary-texture.ts.
-
-**Usage:**
-
-```bash
-npx tsx extract-textures.ts <blp-file> [output-dir]
 ```
 
 ## Requirements
@@ -141,8 +131,8 @@ Extracted assets are saved as DDS files with proper BC3/DXT5 headers:
 ### Key Files
 
 - **[extract-primary-texture.ts](./extract-primary-texture.ts)**: Main extraction tool (recommended)
-- **[extract-textures.ts](./extract-textures.ts)**: Alternative metadata-based extraction
 - **[blp-format.ts](./blp-format.ts)**: BLP header parsing and type definitions
+- **[archive/extract-textures.ts](./archive/extract-textures.ts)**: Archived metadata-based extraction logic (kept for reference)
 
 ## Known Findings
 
