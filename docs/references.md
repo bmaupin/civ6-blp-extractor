@@ -9,6 +9,6 @@ Here are some resources documenting what is known so far of BLP files:
 - https://github.com/ghost-ng/blp-studio/wiki/Technical-Specs
   - Deep-dive reference for the internal structures and binary formats behind Civilization VII's asset packaging system.
 - https://github.com/ghost-ng/blp-studio/wiki/BLP-Format-Specification
-  - BLP Format Specification
+  - BLP Format Specification used for Civ 7 BLP files
 - Civ 7 BLP files use Oodle Kraken compression
   - If Civ 6 BLP files use it as well, this tool could be useful for decompression: https://github.com/baconwaifu/ooz
