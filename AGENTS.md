@@ -1,4 +1,5 @@
 - This is a project to extract files from BLP files used by Sid Meier's Civilization VI
+- Current findings are in docs/findings.md
 - Scripts that have been created for investigation and in-progress work are in workdir/scripts
   - If you create any new scripts for investigation, put them in workdir/scripts with a concise description at the top of each script
   - When possible, reuse or modify an existing script in workdir/scripts instead of creating a new one
