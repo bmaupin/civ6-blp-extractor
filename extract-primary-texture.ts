@@ -22,6 +22,7 @@
 import fs from 'fs';
 import path from 'path';
 import {
+  DXGI_FORMATS,
   parseBLPHeader,
   parsePreamble,
   readUInt64LE,
@@ -320,6 +321,68 @@ function readTextureEntry(
   };
 }
 
+function getTextureEntries(buffer: Buffer, header: BLPHeader): TextureEntry[] {
+  try {
+    const packageData = buffer.subarray(
+      header.packageDataOffset,
+      header.packageDataOffset + header.packageDataSize,
+    );
+
+    const preamble = parsePreamble(packageData, 0);
+    if (preamble.version !== 5) {
+      return [];
+    }
+
+    const packageHeader = parsePackageHeader(packageData, 0);
+    const stripeMap = chooseStripeMap(packageData, packageHeader.stripes);
+
+    const allocations = parseAllocationTable(
+      packageData,
+      stripeMap,
+      packageHeader.linkerDataOffset,
+      packageHeader.sizeOfPackageAllocation || 40,
+    );
+
+    if (allocations.length === 0) {
+      return [];
+    }
+
+    const textures: TextureEntry[] = [];
+    let debugTextureCount = 0;
+    for (const alloc of allocations) {
+      const typeName = getTypeName(alloc, allocations, packageData, stripeMap);
+      if (!typeName || !typeName.endsWith('TextureEntry')) {
+        continue;
+      }
+
+      const entry = readTextureEntry(
+        alloc,
+        allocations,
+        packageData,
+        stripeMap,
+      );
+      if (entry) {
+        textures.push(entry);
+        debugTextureCount++;
+        if (debugTextureCount <= 3 || debugTextureCount > textures.length - 3) {
+          // Log first 3 and last 3 for debugging
+          if (process.env.DEBUG_TEXTURES) {
+            console.log(
+              `  [DEBUG] Texture ${textures.length - 1}: ${entry.name} ${entry.width}x${entry.height}, format=${entry.format}, offset=${entry.offset}`,
+            );
+          }
+        }
+      }
+    }
+
+    // BigData is ordered by payload offset, so sort to align indices.
+    textures.sort((a, b) => a.offset - b.offset);
+    return textures;
+  } catch {
+    return [];
+  }
+}
+
 function hasMetadataLikePrefix(name: string): boolean {
   // Common metadata/member-name prefixes observed in package strings
   if (/^m_/i.test(name)) return true;
@@ -371,6 +434,15 @@ function getTextureNameByIndex(
   header: BLPHeader,
   textureIndex: number,
 ): string {
+  // First preference: resolve texture name from parsed TextureEntry metadata.
+  const textureEntries = getTextureEntries(buffer, header);
+  if (textureIndex >= 0 && textureIndex < textureEntries.length) {
+    const entryName = textureEntries[textureIndex]?.name;
+    if (entryName && entryName.length > 0) {
+      return entryName;
+    }
+  }
+
   // Civ 6 BLPs have package data with mostly zeroed headers, so Civ 7-style
   // metadata parsing is unreliable. Texture names are still present as
   // null-terminated strings, mixed with lots of metadata field/type names.
@@ -428,9 +500,33 @@ function getTextureNameByIndex(
   return `texture_${textureIndex}`;
 }
 
+function computeTextureSize(
+  width: number,
+  height: number,
+  mipCount: number,
+  blockBytes?: number,
+  bytesPerPixel?: number,
+): number {
+  let total = 0;
+
+  for (let mip = 0; mip < mipCount; mip++) {
+    const mw = Math.max(1, width >> mip);
+    const mh = Math.max(1, height >> mip);
+
+    if (blockBytes) {
+      const bw = Math.max(1, Math.ceil(mw / 4));
+      const bh = Math.max(1, Math.ceil(mh / 4));
+      total += bw * bh * blockBytes;
+    } else if (bytesPerPixel) {
+      total += mw * mh * bytesPerPixel;
+    }
+  }
+
+  return total;
+}
+
 /**
- * Extract BC3/DXT5 compressed texture data
- * For now, we extract the full mip chain as DDS
+ * Extract texture payload from BigData as DDS using TextureEntry metadata.
  */
 function extractBC3Texture(
   buffer: Buffer,
@@ -438,18 +534,8 @@ function extractBC3Texture(
   textureIndex: number,
   outputDir: string,
   textureName: string,
+  textureEntry?: TextureEntry | null,
 ): ExtractionResult {
-  // Based on investigation.md:
-  // - Each asset block is 87,552 bytes
-  // - BC3 payload occupies the full 87,552 bytes (no separate prefix)
-  // - Texture payload starts at: BigDataOffset + (assetIndex * 87552)
-  // - Note: Earlier assumption of 176-byte prefix was incorrect;
-  //   the prefix is part of the asset header, not skipped data
-
-  const ASSET_SIZE = 87552;
-  const BC3_PAYLOAD_SIZE = 87376; // 7 mipmaps worth; extra ~176 bytes unaccounted
-  const MAIN_MIP_SIZE = 65536; // 256x256 BC3 (64x64 blocks * 16 bytes)
-
   if (header.bigDataCount === 0) {
     throw new Error('No BigData section in this BLP');
   }
@@ -460,30 +546,81 @@ function extractBC3Texture(
     );
   }
 
-  // Calculate offset to this texture's BC3 payload in BigData section
-  // Each asset starts at: header.bigDataOffset + (textureIndex * ASSET_SIZE)
-  const bc3PayloadOffset = header.bigDataOffset + textureIndex * ASSET_SIZE;
+  let entry = textureEntry || null;
+  if (!entry) {
+    const entries = getTextureEntries(buffer, header);
+    entry = entries[textureIndex] || null;
+  }
 
-  if (bc3PayloadOffset + BC3_PAYLOAD_SIZE > buffer.length) {
+  // Fallback for files where TextureEntry parsing fails.
+  const fallbackAssetSize = 87552;
+  const fallbackPayloadSize = 87376;
+  const fallbackWidth = 256;
+  const fallbackHeight = 256;
+  const fallbackMips = 7;
+  const fallbackFormat = 77;
+
+  const format = entry?.format ?? fallbackFormat;
+  const formatInfo = DXGI_FORMATS[format];
+  const blockBytes = formatInfo?.blockBytes;
+  const bytesPerPixel = formatInfo?.bytesPerPixel;
+
+  const width = entry
+    ? Math.max(1, entry.width >> entry.droppedMips)
+    : fallbackWidth;
+  const height = entry
+    ? Math.max(1, entry.height >> entry.droppedMips)
+    : fallbackHeight;
+  const mipCount = entry
+    ? Math.max(1, entry.mips - entry.droppedMips)
+    : fallbackMips;
+
+  const payloadOffset = entry
+    ? header.bigDataOffset + entry.offset
+    : header.bigDataOffset + textureIndex * fallbackAssetSize;
+  const payloadSize = entry?.size ?? fallbackPayloadSize;
+
+  if (payloadOffset + payloadSize > buffer.length) {
     throw new Error(`Texture ${textureIndex} would read beyond file end`);
   }
 
-  // Extract the BC3 payload
-  const bc3Data = buffer.subarray(
-    bc3PayloadOffset,
-    bc3PayloadOffset + BC3_PAYLOAD_SIZE,
+  const payload = buffer.subarray(payloadOffset, payloadOffset + payloadSize);
+
+  const expectedSize = computeTextureSize(
+    width,
+    height,
+    mipCount,
+    blockBytes,
+    bytesPerPixel,
+  );
+  const mainMipSize = computeTextureSize(
+    width,
+    height,
+    1,
+    blockBytes,
+    bytesPerPixel,
   );
 
   console.log(`\nTexture ${textureIndex}: ${textureName}`);
-  console.log(
-    `  Offset in BigData: ${bc3PayloadOffset - header.bigDataOffset}`,
-  );
-  console.log(`  BC3 payload size: ${bc3Data.length} bytes`);
-  console.log(`  Main mip size: ${MAIN_MIP_SIZE} bytes`);
+  console.log(`  Format: DXGI ${format} (${formatInfo?.name || 'UNKNOWN'})`);
+  console.log(`  Stored size: ${width}x${height}, mips=${mipCount}`);
+  console.log(`  Offset in BigData: ${payloadOffset - header.bigDataOffset}`);
+  console.log(`  Payload size: ${payload.length} bytes`);
+  if (expectedSize > 0 && expectedSize !== payload.length) {
+    console.log(
+      `  ⚠️  Size mismatch: expected ${expectedSize}, found ${payload.length}`,
+    );
+  }
 
-  // Build DDS header for BC3/DXT5
-  const ddsHeader = buildBC3DDSHeader(256, 256, 7);
-  const ddsFile = Buffer.concat([ddsHeader, bc3Data]);
+  const ddsHeader = buildDDSHeaderDX10(
+    width,
+    height,
+    mipCount,
+    format,
+    blockBytes,
+    bytesPerPixel,
+  );
+  const ddsFile = Buffer.concat([ddsHeader, payload]);
 
   // Save BC3 compressed version with proper name
   const outputFileName = textureName.endsWith('.dds')
@@ -497,24 +634,27 @@ function extractBC3Texture(
     success: true,
     textureIndex,
     textureName,
-    format: 'BC3/DXT5',
-    width: 256,
-    height: 256,
-    bc3DataSize: bc3Data.length,
-    mainMipSize: MAIN_MIP_SIZE,
+    format: formatInfo?.name || `DXGI_${format}`,
+    width,
+    height,
+    bc3DataSize: payload.length,
+    mainMipSize: mainMipSize,
     outputPath: bc3Path,
   };
 }
 
 /**
- * Build DDS header for BC3/DXT5 compressed texture
+ * Build DDS header using DX10 extension for arbitrary DXGI formats.
  */
-function buildBC3DDSHeader(
+function buildDDSHeaderDX10(
   width: number,
   height: number,
   mipCount: number,
+  dxgiFormat: number,
+  blockBytes?: number,
+  bytesPerPixel?: number,
 ): Buffer {
-  const header = Buffer.alloc(128, 0);
+  const header = Buffer.alloc(148, 0);
 
   // DDS magic
   header.write('DDS ', 0, 4, 'ascii');
@@ -529,22 +669,33 @@ function buildBC3DDSHeader(
   const DDSD_PIXELFORMAT = 0x1000;
   const DDSD_MIPMAPCOUNT = 0x20000;
   const DDSD_LINEARSIZE = 0x80000;
-  const flags =
-    DDSD_CAPS |
-    DDSD_HEIGHT |
-    DDSD_WIDTH |
-    DDSD_PIXELFORMAT |
-    DDSD_MIPMAPCOUNT |
-    DDSD_LINEARSIZE;
+  const DDSD_PITCH = 0x8;
+
+  let flags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
+  if (mipCount > 1) {
+    flags |= DDSD_MIPMAPCOUNT;
+  }
+  if (blockBytes) {
+    flags |= DDSD_LINEARSIZE;
+  } else if (bytesPerPixel) {
+    flags |= DDSD_PITCH;
+  }
+
   header.writeUInt32LE(flags, 8);
 
   header.writeUInt32LE(height, 12); // dwHeight
   header.writeUInt32LE(width, 16); // dwWidth
 
-  // dwPitchOrLinearSize - for BC3, size of top mip in bytes
-  const linearSize =
-    Math.max(1, Math.ceil(width / 4)) * Math.max(1, Math.ceil(height / 4)) * 16;
-  header.writeUInt32LE(linearSize, 20);
+  // dwPitchOrLinearSize
+  if (blockBytes) {
+    const topSize =
+      Math.max(1, Math.ceil(width / 4)) *
+      Math.max(1, Math.ceil(height / 4)) *
+      blockBytes;
+    header.writeUInt32LE(topSize, 20);
+  } else if (bytesPerPixel) {
+    header.writeUInt32LE(width * bytesPerPixel, 20);
+  }
 
   header.writeUInt32LE(0, 24); // dwDepth
   header.writeUInt32LE(mipCount, 28); // dwMipMapCount
@@ -552,13 +703,24 @@ function buildBC3DDSHeader(
   // DDS_PIXELFORMAT (32 bytes at offset 76)
   header.writeUInt32LE(32, 76); // dwSize
   header.writeUInt32LE(0x4, 80); // dwFlags = DDPF_FOURCC
-  header.write('DXT5', 84, 4, 'ascii'); // dwFourCC
+  header.write('DX10', 84, 4, 'ascii'); // dwFourCC
 
   // Caps
   const DDSCAPS_COMPLEX = 0x8;
   const DDSCAPS_TEXTURE = 0x1000;
   const DDSCAPS_MIPMAP = 0x400000;
-  header.writeUInt32LE(DDSCAPS_COMPLEX | DDSCAPS_TEXTURE | DDSCAPS_MIPMAP, 108);
+  let caps = DDSCAPS_TEXTURE;
+  if (mipCount > 1) {
+    caps |= DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+  }
+  header.writeUInt32LE(caps, 108);
+
+  // DDS_HEADER_DXT10
+  header.writeUInt32LE(dxgiFormat, 128);
+  header.writeUInt32LE(3, 132); // D3D10_RESOURCE_DIMENSION_TEXTURE2D
+  header.writeUInt32LE(0, 136); // miscFlag
+  header.writeUInt32LE(1, 140); // array size
+  header.writeUInt32LE(0, 144); // miscFlags2
 
   return header;
 }
@@ -599,15 +761,21 @@ async function main() {
 
   const buffer = fs.readFileSync(blpPath);
   const header = parseBLPHeader(buffer);
+  const textureEntries = getTextureEntries(buffer, header);
 
   console.log(`\nBLP Info:`);
   console.log(`  Magic: ${header.magic}`);
   console.log(`  File size: ${header.fileSize} bytes`);
   console.log(`  BigData offset: ${header.bigDataOffset}`);
   console.log(`  BigData count: ${header.bigDataCount}`);
+  if (textureEntries.length > 0) {
+    console.log(`  Parsed texture entries: ${textureEntries.length}`);
+  }
 
   // Get the proper texture name from metadata
-  const textureName = getTextureNameByIndex(buffer, header, textureIndex);
+  const metadataEntry = textureEntries[textureIndex] || null;
+  const textureName =
+    metadataEntry?.name || getTextureNameByIndex(buffer, header, textureIndex);
 
   const result = extractBC3Texture(
     buffer,
@@ -615,6 +783,7 @@ async function main() {
     textureIndex,
     outputDir,
     textureName,
+    metadataEntry,
   );
 
   console.log(`\n✅ Extraction complete!`);
