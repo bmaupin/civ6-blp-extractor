@@ -23,6 +23,9 @@ npm install
 # Extract a single asset by index
 node extract-primary-texture.ts <blp-file> <asset-index> [output-dir]
 
+# List all asset names in a BLP file
+node extract-primary-texture.ts <blp-file> --list
+
 # Example: Extract asset 0 from strategicview_terrainsprites.blp
 node extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 0 workdir/extracted
 ```

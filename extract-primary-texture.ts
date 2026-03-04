@@ -856,15 +856,20 @@ function buildDDSHeaderDX10(
 
 async function main() {
   const args = process.argv.slice(2);
+  const listOnly = args.includes('--list') || args.includes('-l');
+  const positionalArgs = args.filter((arg) => arg !== '--list' && arg !== '-l');
 
-  if (args.length < 1) {
+  if (positionalArgs.length < 1) {
     console.log(
-      'Usage: node extract-primary-texture.ts <blp-file> [texture-index] [output-dir]',
+      'Usage: node extract-primary-texture.ts <blp-file> [texture-index] [output-dir] [--list|-l]',
     );
     console.log('');
     console.log('Example:');
     console.log(
       '  node extract-primary-texture.ts workdir/strategicview_terrainsprites.blp 0 workdir/output',
+    );
+    console.log(
+      '  node extract-primary-texture.ts workdir/strategicview_terrainsprites.blp --list',
     );
     console.log('');
     console.log('Texture indices (based on analysis):');
@@ -873,12 +878,19 @@ async function main() {
     process.exit(1);
   }
 
-  const blpPath = args[0];
-  const textureIndex = args[1] ? parseInt(args[1], 10) : 0;
-  const outputDir = args[2] || './output';
+  const blpPath = positionalArgs[0]!;
+  const textureIndex = positionalArgs[1] ? parseInt(positionalArgs[1], 10) : 0;
+  const outputDir = positionalArgs[2] || './output';
 
   if (!fs.existsSync(blpPath)) {
     console.error(`File not found: ${blpPath}`);
+    process.exit(1);
+  }
+
+  if (!listOnly && (Number.isNaN(textureIndex) || textureIndex < 0)) {
+    console.error(
+      `Invalid texture index: ${positionalArgs[1]}. Expected a non-negative integer.`,
+    );
     process.exit(1);
   }
 
@@ -899,6 +911,24 @@ async function main() {
   console.log(`  BigData count: ${header.bigDataCount}`);
   if (textureEntries.length > 0) {
     console.log(`  Parsed texture entries: ${textureEntries.length}`);
+  }
+
+  if (listOnly) {
+    console.log('\nAsset names:');
+    for (let i = 0; i < header.bigDataCount; i++) {
+      const metadataName = textureEntries[i]?.name;
+      const name =
+        metadataName && metadataName.length > 0
+          ? metadataName
+          : getTextureNameByIndex(buffer, header, i, blpPath);
+      console.log(`  ${i.toString().padStart(3, ' ')}: ${name}`);
+    }
+
+    if (header.bigDataCount === 0) {
+      console.log('  (No assets found in BigData)');
+    }
+
+    return;
   }
 
   // Get the proper texture name from metadata
