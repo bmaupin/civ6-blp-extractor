@@ -1,4 +1,4 @@
-Here are some resources documenting what is known so far of BLP files:
+# BLP file references
 
 #### Civ 6 BLP files
 

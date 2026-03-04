@@ -1,12 +1,22 @@
 - This is a project to extract files from BLP files used by Sid Meier's Civilization VI
-- Current findings are in docs/findings.md
-- Scripts that have been created for investigation and in-progress work are in workdir/scripts
-  - If you create any new scripts for investigation, put them in workdir/scripts with a concise description at the top of each script
-  - When possible, reuse or modify an existing script in workdir/scripts instead of creating a new one
-- Some references for BLP files are in docs/references.md
-- Some tools that can be used are in docs/tools.md
+- Use these references as needed
+  - Important findings are in docs/important.md
+  - Some references for BLP files are in docs/blp.md
+  - Some tools that can be used are in docs/tools.md
+- Use these directories
+  - workdir/assets
+    - Reference assets (.blp, .artdef, .dds, etc)
+  - workdir/notes
+    - Notes created by the agent to document progress and investigation work
+  - workdir/scripts
+    - Scripts for investigation and in-progress work
+    - Prefer modifying an existing script to creating a new one
+  - workdir/testdata
+    - Reference .dds files for tests
+    - Do not write to this directory
+  - workdir/tmp
+    - Put temporary files here such as extracted assets
 - Never delete files, only list the relevant scripts so I can run them myself
 - Use British spelling
 - If you use any external references for BLP files, remember this project is only for extracting Civ 6 BLP files. Civ 7 uses a newer version of BLP files that this project does not need to handle, but documentation for Civ 7 BLP files may be useful for reference.
-- If you need to do texture extraction or create other temporary files, please create them in /tmp/civ6-blp-extractor
 - Don't use `npx tsx`. Node 24 supports TypeScript so you can just use `node` to run TypeScript files.
