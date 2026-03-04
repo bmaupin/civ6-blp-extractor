@@ -21,6 +21,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import {
   DXGI_FORMATS,
   parseBLPHeader,
@@ -34,7 +35,7 @@ import {
   type TextureEntry,
 } from './blp-format.ts';
 
-interface ExtractionResult {
+export interface ExtractionResult {
   success: boolean;
   textureIndex: number;
   textureName: string;
@@ -429,15 +430,77 @@ function isLikelyTextureAssetName(name: string): boolean {
   return true;
 }
 
+function normaliseTokens(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length > 0)
+    .map((token) =>
+      token.endsWith('s') && token.length > 3 ? token.slice(0, -1) : token,
+    );
+}
+
+function tokenMatches(a: string, b: string): boolean {
+  return (
+    a === b ||
+    a.startsWith(b) ||
+    b.startsWith(a) ||
+    a.endsWith(b) ||
+    b.endsWith(a)
+  );
+}
+
+function looksLikeContainerLabelForFile(
+  candidateName: string,
+  blpPath: string,
+): boolean {
+  const fileStem = path.basename(blpPath, path.extname(blpPath));
+  const candidateTokens = normaliseTokens(candidateName);
+  const fileTokens = normaliseTokens(fileStem);
+
+  if (candidateTokens.length === 0 || fileTokens.length === 0) {
+    return false;
+  }
+
+  let matches = 0;
+  for (const c of candidateTokens) {
+    if (fileTokens.some((f) => tokenMatches(c, f))) {
+      matches++;
+    }
+  }
+
+  // Treat as a container label if all candidate tokens match file stem tokens,
+  // with at least 2 matches to avoid accidental single-token drops.
+  return matches >= 2 && matches === candidateTokens.length;
+}
+
+function maybeSkipLeadingContainerLabel(
+  names: string[],
+  blpPath?: string,
+): string[] {
+  if (!blpPath || names.length === 0) {
+    return names;
+  }
+
+  if (looksLikeContainerLabelForFile(names[0]!, blpPath)) {
+    return names.slice(1);
+  }
+
+  return names;
+}
+
 function getTextureNameByIndex(
   buffer: Buffer,
   header: BLPHeader,
   textureIndex: number,
+  blpPath?: string,
 ): string {
   // First preference: resolve texture name from parsed TextureEntry metadata.
   const textureEntries = getTextureEntries(buffer, header);
-  if (textureIndex >= 0 && textureIndex < textureEntries.length) {
-    const entryName = textureEntries[textureIndex]?.name;
+  const entryNames = textureEntries.map((entry) => entry.name);
+  const alignedEntryNames = maybeSkipLeadingContainerLabel(entryNames, blpPath);
+  if (textureIndex >= 0 && textureIndex < alignedEntryNames.length) {
+    const entryName = alignedEntryNames[textureIndex];
     if (entryName && entryName.length > 0) {
       return entryName;
     }
@@ -481,23 +544,89 @@ function getTextureNameByIndex(
       i = end;
     }
 
+    const alignedNames = maybeSkipLeadingContainerLabel(names, blpPath);
+
     // Prefer a list aligned with BigData count when possible.
-    if (names.length >= header.bigDataCount && header.bigDataCount > 0) {
-      const alignedNames = names.slice(0, header.bigDataCount);
-      if (textureIndex < alignedNames.length) {
-        return alignedNames[textureIndex]!;
+    if (alignedNames.length >= header.bigDataCount && header.bigDataCount > 0) {
+      const namesByBigData = alignedNames.slice(0, header.bigDataCount);
+      if (textureIndex < namesByBigData.length) {
+        return namesByBigData[textureIndex]!;
       }
     }
 
     // Fallback: return by scanned index if available.
-    if (textureIndex < names.length) {
-      return names[textureIndex]!;
+    if (textureIndex < alignedNames.length) {
+      return alignedNames[textureIndex]!;
     }
   } catch (error) {
     // If anything goes wrong, fall back to generic name
   }
 
   return `texture_${textureIndex}`;
+}
+
+export function extractTextureByName(
+  blpPath: string,
+  targetTextureName: string,
+  outputDir: string,
+): ExtractionResult {
+  if (!fs.existsSync(blpPath)) {
+    throw new Error(`File not found: ${blpPath}`);
+  }
+
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const buffer = fs.readFileSync(blpPath);
+  const header = parseBLPHeader(buffer);
+
+  const normalisedTarget = targetTextureName.toLowerCase();
+  const targetWithoutExt = normalisedTarget.endsWith('.dds')
+    ? normalisedTarget.slice(0, -4)
+    : normalisedTarget;
+
+  let textureIndex = -1;
+  for (let i = 0; i < header.bigDataCount; i++) {
+    const guessedName = getTextureNameByIndex(
+      buffer,
+      header,
+      i,
+      blpPath,
+    ).toLowerCase();
+    const guessedWithoutExt = guessedName.endsWith('.dds')
+      ? guessedName.slice(0, -4)
+      : guessedName;
+    if (
+      guessedName === normalisedTarget ||
+      guessedWithoutExt === targetWithoutExt
+    ) {
+      textureIndex = i;
+      break;
+    }
+  }
+
+  if (textureIndex < 0) {
+    throw new Error(
+      `Texture not found in metadata: ${targetTextureName} (${path.basename(blpPath)})`,
+    );
+  }
+
+  const textureName = getTextureNameByIndex(
+    buffer,
+    header,
+    textureIndex,
+    blpPath,
+  );
+
+  return extractBC3Texture(
+    buffer,
+    header,
+    textureIndex,
+    outputDir,
+    textureName,
+    null,
+  );
 }
 
 function computeTextureSize(
@@ -775,7 +904,8 @@ async function main() {
   // Get the proper texture name from metadata
   const metadataEntry = textureEntries[textureIndex] || null;
   const textureName =
-    metadataEntry?.name || getTextureNameByIndex(buffer, header, textureIndex);
+    metadataEntry?.name ||
+    getTextureNameByIndex(buffer, header, textureIndex, blpPath);
 
   const result = extractBC3Texture(
     buffer,
@@ -795,7 +925,13 @@ async function main() {
   console.log(`  convert ${result.outputPath} output_rgba.png`);
 }
 
-main().catch((error) => {
-  console.error('Error:', error.message);
-  process.exit(1);
-});
+const isDirectRun =
+  typeof process.argv[1] === 'string' &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  main().catch((error) => {
+    console.error('Error:', error.message);
+    process.exit(1);
+  });
+}

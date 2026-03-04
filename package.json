@@ -2,6 +2,9 @@
   "name": "civ-blp-tools",
   "version": "0.1.0",
   "description": "BLP file extraction tools for Civilization VI",
+  "scripts": {
+    "test": "node --test test/extract-primary-texture.test.ts"
+  },
   "engines": {
     "node": ">=24"
   },
